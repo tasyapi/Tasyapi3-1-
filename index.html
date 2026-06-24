@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <title>TAŞ YAPI Puantaj</title>
+  <link rel="manifest" href="/manifest.json"/>
+  <meta name="theme-color" content="#1a2035"/>
+  <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js');});}</script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+    body{margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif;}
+    @media print{
+      .no-print{display:none!important;}
+      .print-only{display:block!important;}
+      body{background:white!important;margin:0;}
+      @page{size:A4 landscape;margin:6mm;}
+      .print-page{page-break-after:always;}
+      .print-page:last-child{page-break-after:avoid;}
+      .pt{width:100%;border-collapse:collapse;font-family:Arial,sans-serif;table-layout:fixed;}
+      .pt th{border:1px solid #333;padding:2px 1px;text-align:center;background:white!important;font-size:7px;font-weight:bold;}
+      .pt td{border:1px solid #555;padding:2px 1px;text-align:center;font-size:7px;background:white!important;color:black!important;}
+      .pn{text-align:left!important;width:85px;font-size:6.5px;}
+      .pg{width:15px;}
+      .ptop{width:20px;font-weight:bold;}
+      .pcikis-ad{color:#cc0000!important;font-weight:bold;}
+      .pcikis-hucre{color:#cc0000!important;}
+    }
+    .print-only{display:none;}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect} = React;
+
+const DURUMLAR = ["","X","İZ","RP","H","ÜCS","½","RT","HT"];
+const DR = {"":"bg-gray-800 text-gray-600","X":"bg-green-500 text-white","İZ":"bg-blue-400 text-white","RP":"bg-red-400 text-white","H":"bg-orange-400 text-white","ÜCS":"bg-purple-400 text-white","½":"bg-yellow-400 text-black","RT":"bg-pink-500 text-white","HT":"bg-slate-600 text-slate-300","-":"bg-gray-700 text-gray-500"};
+const SAYILAN = ["X","İZ","RP","H","½","HT"];
+const AYLAR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
+const COGALT = ["X","İZ","RT","H","RP","ÜCS"];
+
+function ags(y,a){return new Date(y,a+1,0).getDate();}
+function paz(y,a,g){return new Date(y,a,g).getDay()===0;}
+function pd(s){if(!s)return null;const d=new Date(s);return isNaN(d)?null:d;}
+function tg(p){let t=0;Object.values(p.gunler).forEach(d=>{if(d==="½")t+=0.5;else if(SAYILAN.includes(d))t+=1;});return t;}
+
+function hesapla(p,y,a,sifirla=false){
+  const gs=ags(y,a);
+  const yg={};
+  if(!sifirla){
+    Object.entries(p.gunler).forEach(([g,d])=>{if(d!=="HT"&&d!=="-")yg[g]=d;});
+  }
+  function doldur(bas,bit,kod){
+    const b=pd(bas),t=pd(bit);
+    if(!b||!t||b>t)return;
+    const ay1=new Date(y,a,1);
+    if(t<ay1)return;
+    const d=new Date(b);
+    while(d<=t){if(d.getFullYear()===y&&d.getMonth()===a)yg[d.getDate()]=kod;d.setDate(d.getDate()+1);}
+  }
+  doldur(p.izinBas,p.izinBit,"İZ");
+  doldur(p.rpBas,p.rpBit,"RP");
+  doldur(p.ucsBas,p.ucsBit,"ÜCS");
+  doldur(p.hBas,p.hBit,"H");
+  for(let g=1;g<=gs;g++){if(paz(y,a,g)&&!yg[g])yg[g]="HT";}
+  const ct=pd(p.cikis);
+  if(ct){for(let g=1;g<=gs;g++){if(new Date(y,a,g)>ct)yg[g]="-";}}
+  return yg;
+}
+
+// IndexedDB
+function dbAc(){return new Promise((ok,err)=>{const r=indexedDB.open("tasyapi_db",1);r.onupgradeneeded=e=>{if(!e.target.result.objectStoreNames.contains("veri"))e.target.result.createObjectStore("veri");};r.onsuccess=e=>ok(e.target.result);r.onerror=()=>err(r.error);});}
+function dbKaydet(v){dbAc().then(db=>{db.transaction("veri","readwrite").objectStore("veri").put(JSON.stringify(v),"ana");}).catch(()=>{try{localStorage.setItem("ty4",JSON.stringify(v));}catch{}});}
+function dbYukle(){return new Promise(ok=>{dbAc().then(db=>{const r=db.transaction("veri","readonly").objectStore("veri").get("ana");r.onsuccess=e=>{if(e.target.result){try{ok(JSON.parse(e.target.result));return;}catch{}}try{const k=localStorage.getItem("ty4");if(k){ok(JSON.parse(k));return;}}catch{}ok(null);};r.onerror=()=>{try{const k=localStorage.getItem("ty4");if(k){ok(JSON.parse(k));return;}}catch{}ok(null);};}).catch(()=>{try{const k=localStorage.getItem("ty4");if(k){ok(JSON.parse(k));return;}}catch{}ok(null);});});}
+
+const BOŞ_P = (g,i,ad,gorev="")=>({id:g*1000+i,ad,gorev,gunler:{},izinBas:"",izinBit:"",rpBas:"",rpBit:"",ucsBas:"",ucsBit:"",hBas:"",hBit:"",cikis:"",not:"",mesai:""});
+
+const GRUPLAR = [
+  {id:1,ad:"OFİS 1-2",p:[["Uğur Erol","Proje Müdürü"],["Kerem Kahraman",""],["Sinem Mumlu","Muhasebe"],["Fırat Atabay","Muhasebe"],["Rana Yılmaz","Hakediş"],["Arkin Akpınar","İdari"],["Baran Turk Altuntas","İnşaat Mühendisi"],["Doruil Said",""],["Hami Kaldırım","İdari"],["Resul Güven","İdari"],["Askin Akpınar","Elektrik Mühendisi"],["A.Korkut Sarı","Kamp Amiri"],["Zakir Baran",""],["Gülşah Merdan",""],["Erhan Ongen",""],["Eray Vural","Elektrik Mühendisi"]]},
+  {id:2,ad:"ALT YAPI",p:[["Bekir Varışlı","Formen"],["Selahaddin Güzeloğlu",""],["Yaşar Güler",""],["Hasan Doru",""],["Salih Güler",""],["Yalçın Eser",""],["Zübeyir Tiken",""],["Adnan Cuma",""],["Zülfü Üstüsarı",""],["İbrahim Odun",""],["Mehmet Elma",""],["Orhan Ketmen",""],["Aykun Öztürk",""],["Murat Aktaş",""],["Kamil Aslan",""],["Necati Çevik",""],["Paşa Köse",""],["Ersin Özler",""],["Sani Tabur",""],["Mesut Saka",""],["Oktay S. Adıgüzel",""],["Murat Temel",""],["Göktan Kaya",""],["Hakan Pehlivanoğlu",""],["Celalettin Atlas",""],["Ali Benli",""],["Taner Sarıköse",""],["Turgut Menteş",""],["Sadullah Ünsal",""],["Ayhan Keleş",""],["Burhan Soy",""],["Duran Alp",""],["Recep Keleş",""],["Mustafa Kum",""],["Reşit Yorulmaz",""],["Yılmaz Bulut",""],["Dursun Keskin",""],["Selami Gençoğlu",""],["Ömer Civelek",""],["Mehmet Kaya",""],["Ahmet Kaya",""],["Ahmet Demir",""],["Hulusi Eligüzel",""],["Zekeriya Güner",""],["Ali İnan",""],["Ahmet Güven",""],["Shahbaz Ahmed",""],["Muhammed Chand",""],["Husein Tebriz",""],["Allah Ahamed",""],["Kamu Islam",""],["Rubel Hossen",""],["Yeasin Mia",""],["Mustafigur Rahaman",""],["Nabullah Darji",""],["Zeeshan Ali",""],["Ahsan Habib",""],["MD Abu Rayhan",""],["Mognur Rahaman",""],["Shake Sohag Hossen",""],["Delower Hossain",""],["SAQiP Asghar",""],["Julfikar Hossain",""],["Shariful İslam Sawrav",""],["Belal Hossen",""],["Motiul Islam",""],["Gulamjon Saburov",""],["Javlonbek Saburov",""],["Ortaköy Zarifov",""],["Gopal Khatri",""],["Devran Khatri",""],["Serhat Gök",""],["Yusuf Özbek",""],["Mahmut Esen",""],["MD Mijan",""]]},
+  {id:3,ad:"KAMP AMİRLİĞİ",p:[["Mustafa Ayçiçek","Puantör"],["Bayram Ölmez","Kamp Şoförü"],["Mustafa Uflaz","Kamp Şoförü"],["Musa Işık","Kamp Şoförü"],["Ese Özer","Kamp"],["Lama Özer","Kamp"],["Songül Gök","Kamp"],["Ayşe Yiğit","Kamp"],["Kalender Yurdakul","Kamp"],["Mehmet Aslanca","Güvenlik"],["Dolunay Sevener","Güvenlik"],["Ramazan Can",""],["Monjil Hasan","Güvenlik"],["Barış Erol",""],["Volkan Eren","Güvenlik"],["Kemal Temel","Güvenlik"],["Dilip Kumar",""],["Shahidul Hasan",""],["MD Oaliullah",""],["Rasel Hossein",""],["MD Asraful Kabir",""]]},
+  {id:4,ad:"HARİTA-REVİN-İSG",p:[["Oğuzhan Özhan","Harita"],["Sinan Kaya","Harita"],["Osman Özer","Harita"],["MD Rukshar",""],["Asraful Islam",""],["İlanda Ayçiçek","Hemşire"],["M. Çağlar Yıldırım","Hemşire"],["Alperen Güzeloğlu","Hemşire"],["Emre Gürbay","İSG"],["MD Arman Khan","İSG"],["İmamul Hossen","İSG"]]},
+  {id:5,ad:"KALIP 1",p:[["Hasan Demirel",""],["Özcan Demirel",""],["Şaban Başlamış",""],["Şaban Ünal",""],["Jalilbek Rayimbayev",""]]},
+  {id:6,ad:"TAŞ OCAĞI",p:[["Feyzullah Köse",""],["Ahmet Gündüz",""],["Ahmet Bozkurt",""],["Murat Güllü",""],["Burhan Ergin",""],["İbrahim Ergin",""],["Rone Al Mamun",""],["Adnan IQBAL",""],["Abdulkadir İlhan",""],["Azizbek Rozykulyev",""],["İbrahim Kaya",""],["Muhammed Zubair",""],["Mokter Hossain",""],["Saded Abbas",""],["Akter Miah",""],["Ayhan Aydık",""],["Onur Aras",""],["Mustafa Başbınar",""],["MD Toriqul Islam",""],["Umut Can Kaya",""],["MD Mamanur Rashid",""],["Erdal Demirtaş",""],["Montaz Ali",""],["MD Sujon",""],["Süleyman Güler",""],["Jahangir Alam",""],["Habibur Rahman",""],["MD Alamin",""],["Anamul HauQue",""],["Ahmet Eray Ergin",""],["Mustafa Özgür",""]]},
+  {id:7,ad:"KADEME",p:[["Ergün Akçin",""],["Ali Rıza Çetin",""],["Mustafa Erdoğan",""],["Aydın Yetim",""],["Metehan Yetim",""],["Bülent Akbaş",""],["Jahid Hasan",""],["Shimul Hossen",""],["Mehmet Aslan",""],["Durmuş Ali Şimşek",""],["Nasır Uddin Mridha",""],["Hassan Ali",""],["Osman Kansu",""],["Ahmet Kırmızı",""],["Doğukan Ayyıldız",""],["Raju Ahmed",""],["Miskhtur Rahman",""],["Nur Uddin",""],["Atikur Rahman",""],["Alperen Çolakkadı",""],["Cihan Köseoğlu",""]]},
+  {id:8,ad:"DEMİRCİ",p:[["Musa Kaya",""],["Ümit Aslan",""],["Ramazan Aslan",""],["Hasan Demirkazan",""]]},
+  {id:9,ad:"KAYNAK-MEKANİK",p:[["Muzaffer Sarıgül",""],["MD Sarif Sheakh",""],["MD Biblop Hossain",""],["MD RafiQul İslam",""],["MD İmtiaz",""],["Zeeshan RafiQue",""],["Saifur Islam",""],["Yusuf Çelik",""],["Cemal Karakaya",""],["Mehmet Kaplan",""],["Anvar Safarov",""],["Mukhammadjon Hosen",""],["Eyüp Ensar Doğan",""]]},
+  {id:10,ad:"BETON SANTRALİ-LAB",p:[["Alpay Çelen",""],["Yasar Çam",""],["Saifur İslam Sumon",""],["MD Ajal",""],["Mehmet Aslan",""],["Abdülhamit Kızılkaya",""],["Yakıp Elçim",""],["Köksal Bazili",""],["Sajib Mia",""],["Faizan IQBAL",""],["Abu Sayed",""],["MD Ali",""]]},
+  {id:11,ad:"İNCE İŞLER",p:[["Muzaffer Çıplak",""],["İsmail Geçmiş",""],["Abdurrahman Keyik",""],["Hakan Aymaz",""],["Sahabettin Can",""],["Sharikul Islam",""],["Zeeshan Ali",""],["Rakip Hossein",""],["Khairul Islam",""],["Omar Faruk",""],["Bappy Gazi",""],["Jahed Miah",""],["Muhammed Shahin",""],["Harun Ar Rashid",""],["Cemil Yüksel",""]]},
+  {id:12,ad:"DEPO-KANTAR-MAZOT",p:[["Murat Aslan",""],["Veli Özer",""],["Arda Sarı",""],["Onur Aras Comert",""],["Furkan Ölmez",""],["Samet Güler",""],["Levent Koç",""],["Amirul Islam",""],["Akter Hossein",""],["MD Shahajalal",""],["Ali Akbar",""],["Yeasin Ali",""]]},
+  {id:13,ad:"ELEKTRİK",p:[["Göksel Akkoç",""],["Ali Rıza Çetin",""],["Soner Dereci",""],["Göksel Arpa",""],["M.Berk Aydemir",""],["Mahmut Üder",""],["B.Mevlut Kostek",""],["Hüseyin Bayramoğlu",""],["Servet Yılmaz",""],["Yaşar Özcan",""],["Atajan Jorayev",""],["Abdulkadir Kurtar",""],["Celal Aktan",""],["M.Ali Özbek",""],["Bülent Çetin",""],["Mehmet İlya",""],["Ali Taş",""],["Nur Islam",""],["Esan Esan",""],["Jahid Hasan","Elektrik"],["Mataibur Rhaman","Elektrik"],["MD Robel",""],["MD Monir Hossain",""]]},
+].map(g=>({id:g.id,ad:g.ad,personeller:g.p.map(([ad,gorev],i)=>BOŞ_P(g.id,i,ad,gorev))}));
+
+function App(){
+  const [veri,setVeri]=useState({yil:2026,ay:new Date().getMonth(),gruplar:GRUPLAR});
+  const [yuklendi,setYuklendi]=useState(false);
+  const [ekran,setEkran]=useState("tablo");
+  const [secilenHucre,setSecilenHucre]=useState(null);
+  const [pEkrani,setPEkrani]=useState(null);
+  const [cogaltE,setCogaltE]=useState(null);
+  const [yeniAd,setYeniAd]=useState("");
+  const [arama,setArama]=useState("");
+  const [silOnay,setSilOnay]=useState(null);
+  const [uyarilar,setUyarilar]=useState([]);
+  const [printId,setPrintId]=useState(null);
+  const [cBas,setCBas]=useState(1);
+  const [cBit,setCBit]=useState(null);
+  const [cDurum,setCDurum]=useState("X");
+  const [sonGrupId,setSonGrupId]=useState(null);
+
+  const gs=ags(veri.yil,veri.ay);
+  const gunler=Array.from({length:gs},(_,i)=>i+1);
+
+  useEffect(()=>{
+    dbYukle().then(d=>{if(d)setVeri(d);setYuklendi(true);});
+  },[]);
+
+  useEffect(()=>{
+    if(!yuklendi)return;
+    dbKaydet(veri);
+    try{localStorage.setItem("ty4",JSON.stringify(veri));}catch{}
+  },[veri,yuklendi]);
+
+  useEffect(()=>{
+    if(!yuklendi)return;
+    setVeri(v=>({...v,gruplar:v.gruplar.map(g=>({...g,personeller:g.personeller.map(p=>({...p,gunler:hesapla(p,v.yil,v.ay,true)}))}))}));
+  },[veri.ay,veri.yil,yuklendi]);
+
+  useEffect(()=>{
+    const b=new Date();
+    const bugun=new Date(b.getFullYear(),b.getMonth(),b.getDate());
+    const l=[];
+    veri.gruplar.forEach(g=>g.personeller.forEach(p=>{
+      if(p.izinBit){
+        const t=pd(p.izinBit);
+        if(t){
+          const tGun=new Date(t.getFullYear(),t.getMonth(),t.getDate());
+          const fark=Math.ceil((tGun-bugun)/86400000);
+          if(fark===1) l.push({ad:p.ad,grup:g.ad,tip:"isbasi"});
+          if(fark===0) l.push({ad:p.ad,grup:g.ad,tip:"bugun"});
+        }
+      }
+    }));
+    setUyarilar(l);
+  },[veri]);
+
+  function pGuncelle(gid,pid,alan,deger){
+    setVeri(v=>{
+      const yeni={...v,gruplar:v.gruplar.map(g=>g.id!==gid?g:{...g,personeller:g.personeller.map(p=>{
+        if(p.id!==pid)return p;
+        const yn={...p,[alan]:deger};
+        return {...yn,gunler:hesapla(yn,v.yil,v.ay,false)};
+      })})};
+      dbKaydet(yeni);
+      try{localStorage.setItem("ty4",JSON.stringify(yeni));}catch{}
+      return yeni;
+    });
+  }
+
+  function hGuncelle(gid,pid,gun,deger){
+    setVeri(v=>{
+      const yeni={...v,gruplar:v.gruplar.map(g=>g.id!==gid?g:{...g,personeller:g.personeller.map(p=>{
+        if(p.id!==pid)return p;
+        const ct=pd(p.cikis);
+        if(ct&&new Date(v.yil,v.ay,gun)>ct)return p;
+        const yg=hesapla(p,v.yil,v.ay,false);
+        if(deger==="")delete yg[gun];else yg[gun]=deger;
+        return {...p,gunler:yg};
+      })})};
+      dbKaydet(yeni);
+      try{localStorage.setItem("ty4",JSON.stringify(yeni));}catch{}
+      return yeni;
+    });
+  }
+
+  function pEkle(gid){
+    if(!yeniAd.trim())return;
+    const yeni=BOŞ_P(gid,Date.now(),yeniAd.trim());
+    yeni.gunler=hesapla(yeni,veri.yil,veri.ay,true);
+    setVeri(v=>({...v,gruplar:v.gruplar.map(g=>g.id!==gid?g:{...g,personeller:[...g.personeller,yeni]})}));
+    setYeniAd("");
+  }
+
+  function pSil(gid,pid){
+    setVeri(v=>({...v,gruplar:v.gruplar.map(g=>g.id!==gid?g:{...g,personeller:g.personeller.filter(p=>p.id!==pid)})}));
+    setSilOnay(null);setPEkrani(null);setEkran("tablo");
+  }
+
+  function cogaltUygula(){
+    const bas=cBas,bit=cBit||gs;
+    setVeri(v=>({...v,gruplar:v.gruplar.map(g=>g.id!==cogaltE.gid?g:{...g,personeller:g.personeller.map(p=>{
+      // Grup modunda tüm personele, tekli modda sadece seçili personele
+      if(cogaltE.pid!=="grup" && p.id!==cogaltE.pid) return p;
+      const yg=hesapla(p,v.yil,v.ay,false);
+      const ct=pd(p.cikis);
+      for(let g2=bas;g2<=bit;g2++){
+        if(!yg[g2]&&!paz(v.yil,v.ay,g2)&&!(ct&&new Date(v.yil,v.ay,g2)>ct))yg[g2]=cDurum;
+      }
+      return {...p,gunler:yg};
+    })})}));
+    setCogaltE(null);setEkran("tablo");
+  }
+
+  function excelIndir(gid){
+    const wb=XLSX.utils.book_new();
+    const hedef=gid==="all"?veri.gruplar:veri.gruplar.filter(g=>g.id===gid);
+    const gl=Array.from({length:gs},(_,i)=>i+1);
+    hedef.forEach(g=>{
+      const rows=[
+        ["TAŞ YAPI — Puantör: Mustafa Ayçiçek"],
+        [g.ad+" | "+AYLAR[veri.ay]+" "+veri.yil+" | "+g.personeller.length+" Personel"],
+        [],
+        ["AD SOYAD","GÖREVİ",...gl.map(String),"GÜN","MESAİ(s)"],
+      ];
+      g.personeller.forEach(p=>{
+        const ct=pd(p.cikis);
+        const satir=[p.ad,p.gorev||"",...gl.map(gun=>{
+          const d=p.gunler[gun]||"";
+          const gt=new Date(veri.yil,veri.ay,gun);
+          return ct&&gt>ct?"-":(d||"");
+        }),tg(p),p.mesai||""];
+        rows.push(satir);
+      });
+      const ws=XLSX.utils.aoa_to_sheet(rows);
+      ws["!cols"]=[{wch:20},{wch:12},...gl.map(()=>({wch:4})),{wch:5}];
+      XLSX.utils.book_append_sheet(wb,ws,g.ad.substring(0,31));
+    });
+    XLSX.writeFile(wb,"TasYapi_"+AYLAR[veri.ay]+"_"+veri.yil+".xlsx");
+  }
+
+  function printGrup(gid){
+    setPrintId(gid);
+    setTimeout(()=>{window.print();setTimeout(()=>setPrintId(null),800);},400);
+  }
+
+  // Son gruba scroll
+  useEffect(()=>{
+    if(ekran==="tablo" && sonGrupId){
+      setTimeout(()=>{
+        const el=document.getElementById("grup-"+sonGrupId);
+        if(el) el.scrollIntoView({behavior:"smooth",block:"start"});
+      },100);
+    }
+  },[ekran]);
+
+  if(!yuklendi)return(
+    <div className="min-h-screen flex items-center justify-center" style={{background:"#0a0f1e"}}>
+      <div className="flex flex-col items-center gap-4"><img src="logo192.png" style={{width:120,height:120,borderRadius:16}}/><div className="text-yellow-400 text-xl font-bold">TAŞ YAPI yükleniyor...</div></div>
+    </div>
+  );
+
+  // HÜCRE EKRANI
+  if(ekran==="hucre"&&secilenHucre){
+    const g=veri.gruplar.find(g=>g.id===secilenHucre.gid);
+    const p=g?.personeller.find(p=>p.id===secilenHucre.pid);
+    const mevcut=p?.gunler[secilenHucre.gun]||"";
+    return(
+      <div className="min-h-screen flex flex-col" style={{background:"#0a0f1e"}}>
+        <div className="flex items-center gap-3 px-4 py-4" style={{background:"#1a2035"}}>
+          <button onClick={()=>{setEkran("tablo");setSecilenHucre(null);}} className="text-white text-2xl px-2">←</button>
+          <div><div className="text-white font-bold text-lg">{p?.ad}</div>
+          <div className="text-slate-400 text-sm">{AYLAR[veri.ay]} {secilenHucre.gun}. Gün</div></div>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center px-6 gap-3">
+          {DURUMLAR.map(d=>(
+            <button key={d} onClick={()=>{hGuncelle(secilenHucre.gid,secilenHucre.pid,secilenHucre.gun,d);setEkran("tablo");setSecilenHucre(null);}}
+              className={`w-full max-w-xs py-5 rounded-2xl text-xl font-bold active:scale-95 ${d===mevcut?"ring-4 ring-yellow-400 scale-105":""} ${d===""?"bg-gray-700 text-gray-400":DR[d]}`}>
+              {d===""?"Boş/Temizle":d==="½"?"½ Yarım Gün":d==="RT"?"RT Resmi Tatil":d==="HT"?"HT Hafta Tatili":d}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ÇOĞALT EKRANI
+  if(ekran==="cogalt"&&cogaltE){
+    const g=veri.gruplar.find(g=>g.id===cogaltE.gid);
+    const p=g?.personeller.find(p=>p.id===cogaltE.pid);
+    return(
+      <div className="min-h-screen flex flex-col" style={{background:"#0a0f1e"}}>
+        <div className="flex items-center gap-3 px-4 py-4" style={{background:"#1a2035"}}>
+          <button onClick={()=>{setEkran("tablo");setCogaltE(null);}} className="text-white text-2xl px-2">←</button>
+          <div>
+          <div className="text-white font-bold text-lg">
+            {cogaltE?.pid==="grup" ? (veri.gruplar.find(g=>g.id===cogaltE?.gid)?.ad||"Grup") : p?.ad}
+          </div>
+          <div className="text-slate-400 text-sm">
+            {cogaltE?.pid==="grup" ? "Tüm Personele Çoğalt" : "Hücre Çoğalt"}
+          </div>
+        </div>
+        </div>
+        <div className="flex-1 px-4 py-6 space-y-6">
+          <div style={{background:"#1a2035"}} className="rounded-2xl p-4 space-y-3">
+            <div className="text-yellow-400 font-bold">Durum Seç</div>
+            <div className="grid grid-cols-2 gap-3">
+              {COGALT.map(d=>(
+                <button key={d} onClick={()=>setCDurum(d)}
+                  className={`py-4 rounded-xl text-lg font-bold ${DR[d]} ${cDurum===d?"ring-4 ring-yellow-400 scale-105":""}`}>{d}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{background:"#1a2035"}} className="rounded-2xl p-4 space-y-3">
+            <div className="text-yellow-400 font-bold">Gün Aralığı</div>
+            <div className="flex items-center gap-3">
+              <div className="flex-1">
+                <div className="text-slate-400 text-sm mb-1">Başlangıç</div>
+                <select value={cBas} onChange={e=>setCBas(+e.target.value)} className="w-full rounded-xl px-3 py-3 text-white" style={{background:"#0a0f1e",border:"1px solid #334155"}}>
+                  {gunler.map(g=><option key={g} value={g}>{g}. Gün</option>)}
+                </select>
+              </div>
+              <div className="text-white font-bold">→</div>
+              <div className="flex-1">
+                <div className="text-slate-400 text-sm mb-1">Bitiş</div>
+                <select value={cBit||gs} onChange={e=>setCBit(+e.target.value)} className="w-full rounded-xl px-3 py-3 text-white" style={{background:"#0a0f1e",border:"1px solid #334155"}}>
+                  {gunler.map(g=><option key={g} value={g}>{g}. Gün</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="text-slate-400 text-sm">⚠️ Pazar, dolu ve çıkış sonrası günler atlanır</div>
+          </div>
+          <button onClick={cogaltUygula} className={`w-full py-5 rounded-2xl text-xl font-bold ${DR[cDurum]}`}>✅ {cDurum} Uygula</button>
+        </div>
+      </div>
+    );
+  }
+
+  // PERSONEL DETAY
+  if(ekran==="personelDetay"&&pEkrani){
+    const g=veri.gruplar.find(g=>g.id===pEkrani.gid);
+    const p=g?.personeller.find(p=>p.id===pEkrani.pid);
+    if(!p){setEkran("tablo");return null;}
+    const inp=(label,alan,tip="date",ph="")=>(
+      <div>
+        <div className="text-slate-400 text-sm mb-1">{label}</div>
+        <input type={tip} value={p[alan]||""} onChange={e=>pGuncelle(g.id,p.id,alan,e.target.value)}
+          placeholder={ph} className="w-full rounded-xl px-3 py-3 text-white" style={{background:"#0a0f1e",border:"1px solid #334155"}}/>
+      </div>
+    );
+    return(
+      <div className="min-h-screen" style={{background:"#0a0f1e"}}>
+        <div className="flex items-center gap-3 px-4 py-4 sticky top-0 z-10" style={{background:"#1a2035"}}>
+          <button onClick={()=>setEkran("tablo")} className="text-white text-2xl px-2">←</button>
+          <div className="text-white font-bold text-lg">{p.ad}</div>
+        </div>
+        <div className="px-4 py-4 space-y-4">
+          <button onClick={()=>{setCogaltE({gid:g.id,pid:p.id});setCBas(new Date().getDate());setCBit(gs);setEkran("cogalt");}}
+            className="w-full py-4 rounded-2xl bg-green-600 text-white font-bold text-lg">📋 Hücre Çoğalt</button>
+          <div style={{background:"#1a2035"}} className="rounded-2xl p-4 space-y-4">
+            <div className="text-yellow-400 font-bold">📋 Bilgiler</div>
+            {inp("Ad Soyad","ad","text")}
+            {inp("Görevi / Unvanı","gorev","text","Operatör, Kalıpçı...")}
+            {inp("İzin Başlangıç","izinBas")}
+            {inp("İzin Bitiş","izinBit")}
+            {inp("RP Başlangıç","rpBas")}
+            {inp("RP Bitiş","rpBit")}
+            {inp("ÜCS Başlangıç","ucsBas")}
+            {inp("ÜCS Bitiş","ucsBit")}
+            {inp("H Başlangıç","hBas")}
+            {inp("H Bitiş","hBit")}
+            {inp("🚪 Çıkış Tarihi","cikis")}
+            {inp("⏱️ Mesai Saati (bu ay)","mesai","number","Örn: 12")}
+            <div>
+              <div className="text-slate-400 text-sm mb-1">Not</div>
+              <textarea value={p.not||""} onChange={e=>pGuncelle(g.id,p.id,"not",e.target.value)}
+                rows={3} className="w-full rounded-xl px-3 py-3 text-white resize-none" style={{background:"#0a0f1e",border:"1px solid #334155"}}/>
+            </div>
+          </div>
+          <div style={{background:"#1a2035"}} className="rounded-2xl p-4 space-y-1">
+            <div className="text-green-400 font-bold text-lg">Toplam Gün: {tg(p)}</div>
+            <div className="text-orange-400 font-bold">Mesai: {p.mesai||"0"} saat</div>
+          </div>
+          <button onClick={()=>setSilOnay({gid:g.id,pid:p.id})} className="w-full py-4 rounded-2xl bg-red-500 text-white font-bold text-lg">🗑️ Personeli Sil</button>
+        </div>
+        {silOnay&&(
+          <div className="fixed inset-0 flex items-center justify-center z-50" style={{background:"rgba(0,0,0,0.8)"}}>
+            <div className="rounded-2xl p-6 mx-6 space-y-4" style={{background:"#1a2035"}}>
+              <div className="text-white font-bold text-center text-lg">{p.ad} silinsin mi?</div>
+              <div className="flex gap-3">
+                <button onClick={()=>setSilOnay(null)} className="flex-1 py-3 rounded-xl bg-gray-700 text-white font-bold">İptal</button>
+                <button onClick={()=>pSil(silOnay.gid,silOnay.pid)} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-bold">Sil</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // PERSONEL EKLE
+  if(ekran==="personelEkle"){
+    return(
+      <div className="min-h-screen" style={{background:"#0a0f1e"}}>
+        <div className="flex items-center gap-3 px-4 py-4 sticky top-0 z-10" style={{background:"#1a2035"}}>
+          <button onClick={()=>setEkran("tablo")} className="text-white text-2xl px-2">←</button>
+          <div className="text-white font-bold text-xl">➕ Personel Ekle</div>
+        </div>
+        <div className="px-4 py-4 space-y-4">
+          {veri.gruplar.map(g=>(
+            <div key={g.id} style={{background:"#1a2035"}} className="rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="text-yellow-400 font-bold">{g.ad}</div>
+                <span className="text-slate-400 text-sm">{g.personeller.length} kişi</span>
+              </div>
+              <div className="flex gap-2">
+                <input value={yeniAd} onChange={e=>setYeniAd(e.target.value)} placeholder="Ad Soyad..."
+                  className="flex-1 rounded-xl px-3 py-3 text-white text-sm" style={{background:"#0a0f1e",border:"1px solid #334155"}}/>
+                <button onClick={()=>pEkle(g.id)} className="bg-green-500 text-white font-bold px-4 rounded-xl text-lg">+</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // AYARLAR
+  if(ekran==="ayarlar"){
+    return(
+      <div className="min-h-screen" style={{background:"#0a0f1e"}}>
+        <div className="flex items-center gap-3 px-4 py-4 sticky top-0 z-10" style={{background:"#1a2035"}}>
+          <button onClick={()=>setEkran("tablo")} className="text-white text-2xl px-2">←</button>
+          <div className="text-white font-bold text-xl">⚙️ Ayarlar</div>
+        </div>
+        <div className="px-4 py-4 space-y-4">
+          <div style={{background:"#1a2035"}} className="rounded-2xl p-4 space-y-3">
+            <div className="text-yellow-400 font-bold">📅 Dönem Seç</div>
+            <div className="flex gap-2">
+              <select value={veri.ay} onChange={e=>setVeri(v=>({...v,ay:+e.target.value}))}
+                className="flex-1 rounded-xl px-3 py-3 text-white" style={{background:"#0a0f1e",border:"1px solid #334155"}}>
+                {AYLAR.map((a,i)=><option key={i} value={i}>{a}</option>)}
+              </select>
+              <select value={veri.yil} onChange={e=>setVeri(v=>({...v,yil:+e.target.value}))}
+                className="w-28 rounded-xl px-3 py-3 text-white" style={{background:"#0a0f1e",border:"1px solid #334155"}}>
+                {[2026,2027,2028,2029,2030,2031,2032,2033,2034,2035].map(y=><option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+          </div>
+          <button onClick={()=>setEkran("personelEkle")} className="w-full py-4 rounded-2xl bg-green-500 text-white font-bold text-lg">➕ Personel Ekle</button>
+          <div style={{background:"#1a2035"}} className="rounded-2xl p-4 space-y-3">
+            <div className="text-yellow-400 font-bold">🏗️ Grup İşlemleri</div>
+            <div className="flex gap-2">
+              <input value={yeniAd} onChange={e=>setYeniAd(e.target.value)} placeholder="Yeni grup adı..."
+                className="flex-1 rounded-xl px-3 py-3 text-white text-sm" style={{background:"#0a0f1e",border:"1px solid #334155"}}/>
+              <button onClick={()=>{
+                if(!yeniAd.trim())return;
+                const yeniId=Math.max(...veri.gruplar.map(g=>g.id))+1;
+                setVeri(v=>({...v,gruplar:[...v.gruplar,{id:yeniId,ad:yeniAd.trim(),personeller:[]}]}));
+                setYeniAd("");
+              }} className="bg-green-500 text-white font-bold px-4 rounded-xl text-lg">+</button>
+            </div>
+            {veri.gruplar.map(g=>(
+              <div key={g.id} className="flex items-center justify-between rounded-xl px-3 py-2" style={{background:"#0a0f1e"}}>
+                <span className="text-white text-sm">{g.ad} <span className="text-slate-500">({g.personeller.length})</span></span>
+                <button onClick={()=>{if(!window.confirm(g.ad+" silinsin mi?"))return;setVeri(v=>({...v,gruplar:v.gruplar.filter(gr=>gr.id!==g.id)}));}}
+                  className="text-red-400 font-bold px-2">🗑️</button>
+              </div>
+            ))}
+          </div>
+          <div style={{background:"#1a2035"}} className="rounded-2xl p-4 space-y-2">
+            <div className="text-yellow-400 font-bold text-sm">🔗 Uygulama Linki</div>
+            <div className="text-blue-300 text-xs break-all select-all">https://tasyapi-buton.vercel.app</div>
+            <div className="text-slate-400 text-xs">WhatsApp'tan puantöre gönderin</div>
+          </div>
+          <div style={{background:"#1a2035"}} className="rounded-2xl p-4 space-y-3">
+            <div className="text-yellow-400 font-bold">📊 Excel İndir</div>
+            <div className="text-slate-400 text-sm">Excel indir → açıp yazıcıdan bas</div>
+            <button onClick={()=>excelIndir("all")} className="w-full py-4 rounded-2xl bg-green-600 text-white font-bold text-lg">📊 Tüm Grupları Excel İndir</button>
+            {veri.gruplar.map(g=>(
+              <button key={g.id} onClick={()=>excelIndir(g.id)}
+                className="w-full py-3 rounded-xl text-white font-medium text-sm text-left px-4" style={{background:"#1e3a5f"}}>
+                📊 {g.ad} <span className="text-slate-400">({g.personeller.length} kişi)</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ANA TABLO
+  const printGruplar=printId==="all"?veri.gruplar:printId?veri.gruplar.filter(g=>g.id===printId):[];
+  const filtreGruplar=veri.gruplar.map(g=>({
+    ...g,
+    personeller:arama
+      ? (g.ad.toLowerCase().includes(arama.toLowerCase())
+          ? g.personeller  // Grup adı eşleşiyorsa tüm personeller
+          : g.personeller.filter(p=>p.ad.toLowerCase().includes(arama.toLowerCase())))
+      : g.personeller
+  })).filter(g=>!arama||(g.personeller.length>0||g.ad.toLowerCase().includes(arama.toLowerCase())));
+
+  return(
+    <div className="min-h-screen" style={{background:"#0a0f1e"}}>
+      {/* PRINT */}
+      {printGruplar.length>0&&(
+        <div className="print-only">
+          {printGruplar.map(g=>{
+            const gl=Array.from({length:gs},(_,i)=>i+1);
+            return(
+              <div key={g.id} className="print-page">
+                <div style={{fontSize:12,fontWeight:"bold",marginBottom:3}}>TAŞ YAPI — Puantör: Mustafa Ayçiçek</div>
+                <div style={{fontSize:8,marginBottom:5,color:"#444"}}>{g.ad} | {AYLAR[veri.ay]} {veri.yil} | {g.personeller.length} Personel</div>
+                <table className="pt">
+                  <colgroup><col style={{width:"85px"}}/>{gl.map(i=><col key={i} style={{width:"15px"}}/>)}<col style={{width:"20px"}}/></colgroup>
+                  <thead><tr><th className="pn">AD SOYAD</th>{gl.map(gun=><th key={gun} className="pg">{gun}</th>)}<th className="ptop">GÜN</th></tr></thead>
+                  <tbody>
+                    {g.personeller.map(p=>{
+                      const ct=pd(p.cikis);
+                      return(
+                        <tr key={p.id}>
+                          <td className={`pn${p.cikis?" pcikis-ad":""}`}>{p.ad}</td>
+                          {gl.map(gun=>{
+                            const d=p.gunler[gun]||"";
+                            const gt=new Date(veri.yil,veri.ay,gun);
+                            const cs=ct&&gt>ct;
+                            return <td key={gun} className={`pg${cs?" pcikis-hucre":""}`}>{cs?"-":(d||"")}</td>;
+                          })}
+                          <td className="ptop">{tg(p)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* HEADER */}
+      <div className="no-print sticky top-0 z-20 px-3 py-2" style={{background:"#1a2035",borderBottom:"1px solid #334155"}}>
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <div className="flex items-center gap-2"><img src="logo192.png" style={{width:32,height:32,borderRadius:4}}/><div className="text-yellow-400 font-bold text-base">TAŞ YAPI</div></div>
+            <div className="text-slate-300 text-xs">Puantör: Mustafa Ayçiçek</div>
+            <div className="text-slate-500 text-xs">{AYLAR[veri.ay]} {veri.yil}</div>
+          </div>
+          <button onClick={()=>setEkran("ayarlar")} className="bg-yellow-400 text-black font-bold px-3 py-2 rounded-xl text-sm">⚙️</button>
+        </div>
+        <input value={arama} onChange={e=>setArama(e.target.value)} placeholder="🔍 Personel ara..."
+          className="w-full rounded-xl px-3 py-2 text-white text-sm mb-2" style={{background:"#0a0f1e",border:"1px solid #334155"}}/>
+        <div className="flex gap-1 overflow-x-auto pb-1">
+          {DURUMLAR.filter(d=>d).map(d=><span key={d} className={`px-2 py-0.5 rounded text-xs font-bold flex-shrink-0 ${DR[d]}`}>{d}</span>)}
+        </div>
+      </div>
+
+      {/* UYARILAR */}
+      {uyarilar.length>0&&(
+        <div className="no-print px-3 py-2 space-y-1">
+          {uyarilar.map((u,i)=>(
+            <div key={i} className={`rounded-xl px-3 py-2 text-sm font-medium ${u.tip==="bugun"?"bg-green-900 text-green-200":"bg-blue-900 text-blue-200"}`}>
+{u.tip==="bugun" ? `🟢 Bugün işbaşı yapacak: ${u.ad} (${u.grup})` : `⚡ Yarın işe başlayacak: ${u.ad} (${u.grup})`}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* GRUPLAR */}
+      <div className="overflow-x-auto">
+        {filtreGruplar.map(g=>(
+          <div key={g.id} id={"grup-"+g.id} className="mb-4">
+            <div className="no-print px-3 py-2 flex items-center justify-between" style={{background:"#1e3a5f"}}>
+              <input value={g.ad} onChange={e=>setVeri(v=>({...v,gruplar:v.gruplar.map(gr=>gr.id!==g.id?gr:{...gr,ad:e.target.value})}))}
+                className="text-yellow-300 font-bold text-sm bg-transparent border-b border-transparent focus:border-yellow-400 outline-none"/>
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400 text-xs">{g.personeller.length} kişi</span>
+                <button onClick={()=>{
+                  setVeri(v=>({...v,gruplar:v.gruplar.map(gr=>gr.id!==g.id?gr:{...gr,personeller:gr.personeller.map(p=>{
+                    const yg=hesapla(p,v.yil,v.ay,false);
+                    const ct=pd(p.cikis);
+                    for(let gun=1;gun<=gs;gun++){if(!yg[gun]&&!paz(v.yil,v.ay,gun)&&!(ct&&new Date(v.yil,v.ay,gun)>ct))yg[gun]="X";}
+                    return {...p,gunler:yg};
+                  })})}));
+                }} className="text-xs text-green-300 px-2 py-1 rounded font-bold" style={{background:"#166534"}}>X Doldur</button>
+                <button onClick={()=>{
+                  if(!window.confirm(g.ad+" grubunun X'leri silinsin mi?"))return;
+                  setVeri(v=>({...v,gruplar:v.gruplar.map(gr=>gr.id!==g.id?gr:{...gr,personeller:gr.personeller.map(p=>{
+                    const yg={};Object.entries(p.gunler).forEach(([gun,d])=>{if(d!=="X")yg[gun]=d;});return {...p,gunler:yg};
+                  })})}));
+                }} className="text-xs text-red-300 px-2 py-1 rounded font-bold" style={{background:"#7f1d1d"}}>X Sil</button>
+                <button onClick={()=>{setCogaltE({gid:g.id,pid:"grup"});setCBas(new Date().getDate());setCBit(new Date().getDate());setEkran("cogalt");}} 
+                  className="text-xs text-white px-2 py-1 rounded font-bold" style={{background:"#1d4ed8"}}>📋 Grup</button>
+                <button onClick={()=>excelIndir(g.id)} className="text-xs text-green-300 px-2 py-1 rounded font-bold" style={{background:"#166534"}}>📊</button>
+              </div>
+            </div>
+            <table style={{minWidth:"100%",borderCollapse:"separate",borderSpacing:0}}>
+              <thead>
+                <tr>
+                  <th className="no-print sticky left-0 z-10 text-left px-2 py-1 text-slate-400 text-xs whitespace-nowrap"
+                    style={{background:"#1a2035",minWidth:120,borderBottom:"1px solid #334155"}}>AD SOYAD</th>
+                  {gunler.map(gun=>(
+                    <th key={gun} className="text-center text-xs py-1 font-medium"
+                      style={{minWidth:30,background:"#1a2035",color:"#94a3b8",borderBottom:"1px solid #334155"}}>{gun}</th>
+                  ))}
+                  <th className="no-print text-center text-xs py-1 font-bold text-green-400 px-2 whitespace-nowrap"
+                    style={{background:"#1a2035",borderBottom:"1px solid #334155"}}>GÜN</th>
+                  <th className="no-print text-center text-xs py-1 font-bold text-orange-400 px-2 whitespace-nowrap"
+                    style={{background:"#1a2035",borderBottom:"1px solid #334155"}}>MSİ</th>
+                  <th className="no-print" style={{background:"#1a2035",borderBottom:"1px solid #334155",minWidth:42}}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {g.personeller.map((p,idx)=>{
+                  const ct=pd(p.cikis);
+                  const bg=p.cikis?"#2d0a0a":(idx%2===0?"#0a0f1e":"#0f1628");
+                  return(
+                    <tr key={p.id} style={{background:bg}}>
+                      <td className="no-print sticky left-0 z-10 px-2 py-0.5 whitespace-nowrap"
+                        style={{background:bg,minWidth:120,borderRight:"1px solid #334155"}}>
+                        <input value={p.ad} onChange={e=>pGuncelle(g.id,p.id,"ad",e.target.value)}
+                          className="text-blue-300 text-xs font-medium w-full bg-transparent border-b border-transparent focus:border-blue-400 outline-none"
+                          style={{maxWidth:110}}/>
+                        {p.gorev&&<div className="text-yellow-500 text-[9px]">{p.gorev}</div>}
+                        {p.cikis&&<div className="text-red-400 text-[9px]">🚪{p.cikis}</div>}
+                        <div className="cursor-pointer" onClick={()=>{setPEkrani({gid:g.id,pid:p.id});setEkran("personelDetay");}}>
+                          <span className="text-slate-500 text-[9px]">▶ detay</span>
+                        </div>
+                      </td>
+                      {gunler.map(gun=>{
+                        const d=p.gunler[gun]||"";
+                        const cs=ct&&new Date(veri.yil,veri.ay,gun)>ct;
+                        const isPaz=paz(veri.yil,veri.ay,gun);
+                        let cls="w-7 h-7 rounded text-xs font-bold active:scale-90 ";
+                        if(cs||d==="-")cls+="bg-gray-700 text-gray-500";
+                        else if(d)cls+=DR[d]||"bg-gray-500 text-white";
+                        else if(isPaz)cls+=DR["HT"];
+                        else cls+="bg-gray-800 text-gray-700";
+                        const show=cs?"-":(d||(isPaz?"HT":"·"));
+                        return(
+                          <td key={gun} className="no-print text-center py-0.5 px-0">
+                            <button onClick={()=>{if(cs)return;setSonGrupId(g.id);setSecilenHucre({gid:g.id,pid:p.id,gun});setEkran("hucre");}} className={cls}>{show}</button>
+                          </td>
+                        );
+                      })}
+                      <td className="no-print text-center px-2">
+                        <span className="text-green-400 font-bold text-sm">{tg(p)}</span>
+                      </td>
+                      <td className="no-print text-center px-1 cursor-pointer"
+                        onClick={()=>{setPEkrani({gid:g.id,pid:p.id});setEkran("personelDetay");}}>
+                        <span className="text-orange-400 font-bold text-sm">{p.mesai||"-"}</span>
+                      </td>
+                      <td className="no-print text-center px-1">
+                        <button onClick={()=>{setCogaltE({gid:g.id,pid:p.id});setCBas(new Date().getDate());setCBit(gs);setEkran("cogalt");}}
+                          className="text-white rounded-lg px-2 py-1 font-bold text-base" style={{background:"#166534"}}>📋</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
